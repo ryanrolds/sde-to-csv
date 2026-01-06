@@ -1,0 +1,8 @@
+# SDE files
+*.zip
+sde/
+csv/
+
+# Python
+__pycache__/
+*.pyc
