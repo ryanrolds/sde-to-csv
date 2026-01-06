@@ -19,24 +19,6 @@ python3 convert.py sde/ csv/ --only invTypes invGroups
 python3 convert.py sde/ csv/ -q
 ```
 
-## Library Usage
-
-```python
-from convert import convert, convert_all, CONVERTERS
-
-# Convert all files
-convert_all("sde/", "csv/")
-
-# Convert specific files
-convert("sde/", "csv/", only=["invTypes", "invGroups"])
-
-# Quiet mode (no output)
-convert_all("sde/", "csv/", quiet=True)
-
-# List available converters
-print(list(CONVERTERS.keys()))
-```
-
 ## Generated Files
 
 | CSV File | Source | Description |
@@ -53,10 +35,6 @@ print(list(CONVERTERS.keys()))
 | invUniqueNames.csv | npcCharacters.jsonl | NPC character names |
 | invNames.csv | multiple | Entity names (systems, planets, moons, etc) |
 | invItems.csv | multiple | Entity locations and types |
-
-## Not Available
-
-- `aggregatecsv.csv` - market data (use [Fuzzwork Market API](https://market.fuzzwork.co.uk/))
 
 ## Requirements
 
