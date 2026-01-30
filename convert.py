@@ -531,7 +531,8 @@ class InvNamesConverter(SDEConverter):
             roman = self.ROMAN[celestial_idx] if celestial_idx < len(self.ROMAN) else str(celestial_idx)
             rows.append({"itemID": planet_id, "itemName": f"{sys_name} {roman}"})
 
-        # Moons
+        # Moons - also build lookup for station names
+        moons = {}  # id -> (solarSystemID, celestialIndex, orbitIndex)
         for obj in self.read_jsonl("mapMoons.jsonl"):
             moon_id = obj["_key"]
             orbit_id = obj.get("orbitID")
@@ -541,9 +542,11 @@ class InvNamesConverter(SDEConverter):
 
             if orbit_id in planets:
                 _, celestial_idx = planets[orbit_id]
+                moons[moon_id] = (solar_id, celestial_idx, orbit_idx)
                 roman = self.ROMAN[celestial_idx] if celestial_idx < len(self.ROMAN) else str(celestial_idx)
                 rows.append({"itemID": moon_id, "itemName": f"{sys_name} {roman} - Moon {orbit_idx}"})
             else:
+                moons[moon_id] = (solar_id, 0, orbit_idx)
                 rows.append({"itemID": moon_id, "itemName": f"{sys_name} - Moon {orbit_idx}"})
 
         # Stars (same name as solar system)
@@ -561,9 +564,13 @@ class InvNamesConverter(SDEConverter):
         for obj in self.read_jsonl("mapConstellations.jsonl"):
             rows.append({"itemID": obj["_key"], "itemName": self.get_localized(obj, "name")})
 
-        # Corporations
+        # Corporations - build lookup for station names
+        corporations = {}  # id -> name
         for obj in self.read_jsonl("npcCorporations.jsonl"):
-            rows.append({"itemID": obj["_key"], "itemName": self.get_localized(obj, "name")})
+            corp_id = obj["_key"]
+            corp_name = self.get_localized(obj, "name")
+            corporations[corp_id] = corp_name
+            rows.append({"itemID": corp_id, "itemName": corp_name})
 
         # Factions
         for obj in self.read_jsonl("factions.jsonl"):
@@ -572,6 +579,77 @@ class InvNamesConverter(SDEConverter):
         # NPC Characters
         for obj in self.read_jsonl("npcCharacters.jsonl"):
             rows.append({"itemID": obj["_key"], "itemName": self.get_localized(obj, "name")})
+
+        # Station operations - build lookup for station names
+        operations = {}  # id -> name
+        for obj in self.read_jsonl("stationOperations.jsonl"):
+            operations[obj["_key"]] = self.get_localized(obj, "operationName")
+
+        # NPC Stations
+        for obj in self.read_jsonl("npcStations.jsonl"):
+            station_id = obj["_key"]
+            solar_id = obj.get("solarSystemID")
+            owner_id = obj.get("ownerID")
+            operation_id = obj.get("operationID")
+            orbit_id = obj.get("orbitID")
+            celestial_idx = obj.get("celestialIndex", 0)
+            orbit_idx = obj.get("orbitIndex")
+
+            sys_name = solar_systems.get(solar_id, "Unknown")
+            corp_name = corporations.get(owner_id, "Unknown")
+            operation_name = operations.get(operation_id, "Station")
+
+            # Build station name: "System Planet - Moon N - Corp Operation"
+            roman = self.ROMAN[celestial_idx] if celestial_idx < len(self.ROMAN) else str(celestial_idx)
+            if orbit_idx is not None:
+                # Station orbits a moon
+                station_name = f"{sys_name} {roman} - Moon {orbit_idx} - {corp_name} {operation_name}"
+            else:
+                # Station orbits a planet directly
+                station_name = f"{sys_name} {roman} - {corp_name} {operation_name}"
+
+            rows.append({"itemID": station_id, "itemName": station_name})
+
+        # Factory locations - virtual locations for industry jobs at stations
+        # Factory ID = Station ID + 8000002
+        for obj in self.read_jsonl("npcStations.jsonl"):
+            station_id = obj["_key"]
+            solar_id = obj.get("solarSystemID")
+            owner_id = obj.get("ownerID")
+            operation_id = obj.get("operationID")
+            celestial_idx = obj.get("celestialIndex", 0)
+            orbit_idx = obj.get("orbitIndex")
+
+            sys_name = solar_systems.get(solar_id, "Unknown")
+            corp_name = corporations.get(owner_id, "Unknown")
+            operation_name = operations.get(operation_id, "Station")
+
+            roman = self.ROMAN[celestial_idx] if celestial_idx < len(self.ROMAN) else str(celestial_idx)
+            if orbit_idx is not None:
+                station_name = f"{sys_name} {roman} - Moon {orbit_idx} - {corp_name} {operation_name}"
+            else:
+                station_name = f"{sys_name} {roman} - {corp_name} {operation_name}"
+
+            factory_id = station_id + 8000002
+            rows.append({"itemID": factory_id, "itemName": f"Factories at {station_name}"})
+
+        # Stargates - name format: "Stargate (Destination System)"
+        for obj in self.read_jsonl("mapStargates.jsonl"):
+            stargate_id = obj["_key"]
+            destination = obj.get("destination", {})
+            dest_system_id = destination.get("solarSystemID")
+            dest_name = solar_systems.get(dest_system_id, "Unknown")
+            rows.append({"itemID": stargate_id, "itemName": f"Stargate ({dest_name})"})
+
+        # Asteroid Belts - name format: "System Planet# - Asteroid Belt N"
+        for obj in self.read_jsonl("mapAsteroidBelts.jsonl"):
+            belt_id = obj["_key"]
+            solar_id = obj.get("solarSystemID")
+            celestial_idx = obj.get("celestialIndex", 0)
+            orbit_idx = obj.get("orbitIndex", 1)
+            sys_name = solar_systems.get(solar_id, "Unknown")
+            roman = self.ROMAN[celestial_idx] if celestial_idx < len(self.ROMAN) else str(celestial_idx)
+            rows.append({"itemID": belt_id, "itemName": f"{sys_name} {roman} - Asteroid Belt {orbit_idx}"})
 
         self.write_csv("invNames.csv", self.COLUMNS, rows)
 
@@ -646,6 +724,115 @@ class InvItemsConverter(SDEConverter):
         self.write_csv("invItems.csv", self.COLUMNS, rows)
 
 
+class StaStationsConverter(SDEConverter):
+    """Generate staStations.csv from npcStations.jsonl with full location info."""
+
+    # Column order matches Fuzzwork format
+    COLUMNS = [
+        "stationID",
+        "security",
+        "dockingCostPerVolume",
+        "maxShipVolumeDockable",
+        "officeRentalCost",
+        "operationID",
+        "stationTypeID",
+        "corporationID",
+        "solarSystemID",
+        "constellationID",
+        "regionID",
+        "stationName",
+        "x",
+        "y",
+        "z",
+        "reprocessingEfficiency",
+        "reprocessingStationsTake",
+        "reprocessingHangarFlag",
+    ]
+
+    ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+             "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX"]
+
+    def convert(self):
+        rows = []
+
+        # Build solar system lookup (id -> {name, constellationID, regionID, security})
+        solar_systems = {}
+        for obj in self.read_jsonl("mapSolarSystems.jsonl"):
+            solar_systems[obj["_key"]] = {
+                "name": self.get_localized(obj, "name"),
+                "constellationID": obj.get("constellationID"),
+                "regionID": obj.get("regionID"),
+                "security": obj.get("securityStatus", 0),
+            }
+
+        # Build planet lookup (id -> celestialIndex)
+        planets = {}
+        for obj in self.read_jsonl("mapPlanets.jsonl"):
+            planets[obj["_key"]] = obj.get("celestialIndex", 0)
+
+        # Build corporation lookup (id -> name)
+        corporations = {}
+        for obj in self.read_jsonl("npcCorporations.jsonl"):
+            corporations[obj["_key"]] = self.get_localized(obj, "name")
+
+        # Build operation lookup (id -> name)
+        operations = {}
+        for obj in self.read_jsonl("stationOperations.jsonl"):
+            operations[obj["_key"]] = self.get_localized(obj, "operationName")
+
+        # Process stations
+        for obj in self.read_jsonl("npcStations.jsonl"):
+            station_id = obj["_key"]
+            solar_id = obj.get("solarSystemID", 0)
+            owner_id = obj.get("ownerID", 0)
+            operation_id = obj.get("operationID")
+            celestial_idx = obj.get("celestialIndex", 0)
+            orbit_idx = obj.get("orbitIndex")
+            position = obj.get("position", {})
+
+            # Look up system info
+            sys_info = solar_systems.get(solar_id, {})
+            sys_name = sys_info.get("name", "Unknown")
+            constellation_id = sys_info.get("constellationID", 0)
+            region_id = sys_info.get("regionID", 0)
+            security = sys_info.get("security", 0)
+
+            # Look up corp and operation names
+            corp_name = corporations.get(owner_id, "Unknown")
+            operation_name = operations.get(operation_id, "Station")
+
+            # Build station name
+            roman = self.ROMAN[celestial_idx] if celestial_idx < len(self.ROMAN) else str(celestial_idx)
+            if orbit_idx is not None:
+                station_name = f"{sys_name} {roman} - Moon {orbit_idx} - {corp_name} {operation_name}"
+            else:
+                station_name = f"{sys_name} {roman} - {corp_name} {operation_name}"
+
+            row = {
+                "stationID": station_id,
+                "stationName": station_name,
+                "stationTypeID": obj.get("typeID", 0),
+                "solarSystemID": solar_id,
+                "constellationID": constellation_id,
+                "regionID": region_id,
+                "corporationID": owner_id,
+                "security": security,
+                "dockingCostPerVolume": 0,
+                "maxShipVolumeDockable": 50000000,
+                "officeRentalCost": 10000,
+                "operationID": operation_id,
+                "reprocessingEfficiency": obj.get("reprocessingEfficiency", 0.5),
+                "reprocessingStationsTake": obj.get("reprocessingStationsTake", 0.05),
+                "reprocessingHangarFlag": obj.get("reprocessingHangarFlag", 4),
+                "x": position.get("x", 0),
+                "y": position.get("y", 0),
+                "z": position.get("z", 0),
+            }
+            rows.append(row)
+
+        self.write_csv("staStations.csv", self.COLUMNS, rows)
+
+
 # Registry of all converters
 CONVERTERS: dict[str, type[SDEConverter]] = {
     "invTypes": InvTypesConverter,
@@ -660,6 +847,7 @@ CONVERTERS: dict[str, type[SDEConverter]] = {
     "invUniqueNames": InvUniqueNamesConverter,
     "invNames": InvNamesConverter,
     "invItems": InvItemsConverter,
+    "staStations": StaStationsConverter,
 }
 
 
