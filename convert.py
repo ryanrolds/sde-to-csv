@@ -833,6 +833,25 @@ class StaStationsConverter(SDEConverter):
         self.write_csv("staStations.csv", self.COLUMNS, rows)
 
 
+class DgmTypeAttributesConverter(SDEConverter):
+    """Convert typeDogma.jsonl to dgmTypeAttributes.csv"""
+
+    COLUMNS = ["typeID", "attributeID", "valueInt", "valueFloat"]
+
+    def convert(self):
+        rows = []
+        for obj in self.read_jsonl("typeDogma.jsonl"):
+            type_id = obj.get("_key")
+            for attr in obj.get("dogmaAttributes", []):
+                rows.append({
+                    "typeID": type_id,
+                    "attributeID": attr.get("attributeID"),
+                    "valueInt": None,
+                    "valueFloat": attr.get("value"),
+                })
+        self.write_csv("dgmTypeAttributes.csv", self.COLUMNS, rows)
+
+
 # Registry of all converters
 CONVERTERS: dict[str, type[SDEConverter]] = {
     "invTypes": InvTypesConverter,
@@ -848,6 +867,7 @@ CONVERTERS: dict[str, type[SDEConverter]] = {
     "invNames": InvNamesConverter,
     "invItems": InvItemsConverter,
     "staStations": StaStationsConverter,
+    "dgmTypeAttributes": DgmTypeAttributesConverter,
 }
 
 
