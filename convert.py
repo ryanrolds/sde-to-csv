@@ -263,7 +263,55 @@ class IndustryActivityMaterialsConverter(SDEConverter):
 class IndustryActivityProductsConverter(SDEConverter):
     """Convert blueprints.jsonl to industryActivityProducts.csv"""
 
-    COLUMNS = ["typeID", "activityID", "productTypeID", "quantity"]
+    COLUMNS = ["typeID", "activityID", "productTypeID", "quantity", "probability", "maxProductionLimit"]
+
+    ACTIVITY_IDS = {
+        "manufacturing": 1,
+        "research_time": 3,
+        "research_material": 4,
+        "copying": 5,
+        "invention": 8,
+        "reaction": 11,
+    }
+
+    def convert(self):
+        # First pass: build lookup of blueprintTypeID -> maxProductionLimit
+        max_prod_limits = {}
+        for obj in self.read_jsonl("blueprints.jsonl"):
+            bp_id = obj.get("blueprintTypeID")
+            limit = obj.get("maxProductionLimit")
+            if bp_id is not None and limit is not None:
+                max_prod_limits[bp_id] = limit
+
+        # Second pass: emit rows, attaching maxProductionLimit for invention products
+        rows = []
+        for obj in self.read_jsonl("blueprints.jsonl"):
+            blueprint_id = obj.get("blueprintTypeID")
+            activities = obj.get("activities", {})
+            for activity_name, activity_data in activities.items():
+                activity_id = self.ACTIVITY_IDS.get(activity_name)
+                if activity_id is not None:
+                    for product in activity_data.get("products", []):
+                        product_type_id = product.get("typeID")
+                        row = {
+                            "typeID": blueprint_id,
+                            "activityID": activity_id,
+                            "productTypeID": product_type_id,
+                            "quantity": product.get("quantity"),
+                            "probability": product.get("probability", ""),
+                            # For invention, store the T2 blueprint's maxProductionLimit
+                            # as the base invention runs
+                            "maxProductionLimit": max_prod_limits.get(product_type_id, "")
+                                if activity_id == 8 else "",
+                        }
+                        rows.append(row)
+        self.write_csv("industryActivityProducts.csv", self.COLUMNS, rows)
+
+
+class IndustryActivitySkillsConverter(SDEConverter):
+    """Convert blueprints.jsonl to industryActivitySkills.csv"""
+
+    COLUMNS = ["typeID", "activityID", "skillID", "level"]
 
     ACTIVITY_IDS = {
         "manufacturing": 1,
@@ -282,15 +330,15 @@ class IndustryActivityProductsConverter(SDEConverter):
             for activity_name, activity_data in activities.items():
                 activity_id = self.ACTIVITY_IDS.get(activity_name)
                 if activity_id is not None:
-                    for product in activity_data.get("products", []):
+                    for skill in activity_data.get("skills", []):
                         row = {
                             "typeID": blueprint_id,
                             "activityID": activity_id,
-                            "productTypeID": product.get("typeID"),
-                            "quantity": product.get("quantity"),
+                            "skillID": skill.get("typeID"),
+                            "level": skill.get("level"),
                         }
                         rows.append(row)
-        self.write_csv("industryActivityProducts.csv", self.COLUMNS, rows)
+        self.write_csv("industryActivitySkills.csv", self.COLUMNS, rows)
 
 
 class RamActivitiesConverter(SDEConverter):
@@ -861,6 +909,7 @@ CONVERTERS: dict[str, type[SDEConverter]] = {
     "industryActivity": IndustryActivityConverter,
     "industryActivityMaterials": IndustryActivityMaterialsConverter,
     "industryActivityProducts": IndustryActivityProductsConverter,
+    "industryActivitySkills": IndustryActivitySkillsConverter,
     "ramActivities": RamActivitiesConverter,
     "invFlags": InvFlagsConverter,
     "invUniqueNames": InvUniqueNamesConverter,
